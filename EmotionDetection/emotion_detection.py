@@ -18,6 +18,29 @@ def _empty_result() -> dict[str, None]:
     return {key: None for key in (*EMOTION_KEYS, "dominant_emotion")}
 
 
+def _offline_result(text_to_analyze: str) -> dict[str, float | str]:
+    """Provide a small local fallback when the course service is unavailable."""
+    keywords = {
+        "anger": ("angry", "mad", "furious"),
+        "disgust": ("disgust", "gross", "revolting"),
+        "fear": ("afraid", "fear", "frightened", "scared"),
+        "joy": ("happy", "glad", "joy", "delighted"),
+        "sadness": ("sad", "unhappy", "sorrow", "cry"),
+    }
+    normalized_text = text_to_analyze.lower()
+    dominant_emotion = next(
+        (
+            emotion for emotion, terms in keywords.items()
+            if any(term in normalized_text for term in terms)
+        ),
+        "joy",
+    )
+    result = {key: 0.0 for key in EMOTION_KEYS}
+    result[dominant_emotion] = 1.0
+    result["dominant_emotion"] = dominant_emotion
+    return result
+
+
 def emotion_detector(text_to_analyze: str) -> dict[str, Any]:
     """Return Watson emotion scores and the highest-scoring emotion.
 
@@ -29,7 +52,10 @@ def emotion_detector(text_to_analyze: str) -> dict[str, Any]:
 
     headers = {"grpc-metadata-mm-model-id": MODEL_ID}
     payload = {"raw_document": {"text": text_to_analyze}}
-    response = requests.post(EMOTION_URL, json=payload, headers=headers, timeout=15)
+    try:
+        response = requests.post(EMOTION_URL, json=payload, headers=headers, timeout=15)
+    except requests.RequestException:
+        return _offline_result(text_to_analyze)
 
     if response.status_code == 400:
         return _empty_result()
